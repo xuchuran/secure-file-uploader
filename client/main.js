@@ -1,91 +1,329 @@
-class FileUploader {
-    constructor() {
-        this.socket = io();
-        this.initializeElements();
-        this.setupEventListeners();
-    }
-
-    initializeElements() {
-        this.dropZone = document.getElementById('dropZone');
-        this.fileInput = document.getElementById('fileInput');
-        this.progressContainer = document.getElementById('progressContainer');
-        this.progressFill = document.getElementById('progressFill');
-        this.progressText = document.getElementById('progressText');
-        this.successMessage = document.getElementById('successMessage');
-    }
-
-    setupEventListeners() {
-        // 拖拽事件
-        this.dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            this.dropZone.style.borderColor = '#764ba2';
-        });
-
-        this.dropZone.addEventListener('dragleave', () => {
-            this.dropZone.style.borderColor = '#667eea';
-        });
-
-        this.dropZone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            this.dropZone.style.borderColor = '#667eea';
-            const files = Array.from(e.dataTransfer.files);
-            if (files.length > 0) {
-                this.handleFile(files[0]);
-            }
-        });
-
-        // 点击选择文件
-        this.dropZone.addEventListener('click', () => {
-            this.fileInput.click();
-        });
-
-        this.fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                this.handleFile(e.target.files[0]);
-            }
-        });
-    }
-
-    handleFile(file) {
-        console.log('选择文件:', file.name, file.size);
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>雷速云传 - Dropbox 高速文件上传器</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        this.progressContainer.style.display = 'block';
-        this.successMessage.style.display = 'none';
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .title {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 2.5em;
+            font-weight: 700;
+            text-align: center;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 25px;
+            font-size: 1.1em;
+            text-align: center;
+        }
+
+        .login-section {
+            margin-bottom: 30px;
+        }
+
+        .login-card {
+            background: #f8f9ff;
+            border: 2px solid #667eea;
+            border-radius: 15px;
+            padding: 30px;
+        }
+
+        .login-card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .input-group input:focus {
+            border-color: #667eea;
+            outline: none;
+        }
+
+        .password-group {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+        }
+
+        .login-btn {
+            width: 100%;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .login-btn:hover {
+            background: #5a6fd8;
+        }
+
+        .help-links {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+
+        .help-links a {
+            color: #667eea;
+            text-decoration: none;
+            margin: 0 10px;
+        }
+
+        .account-info {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            text-align: center;
+            display: none;
+        }
+
+        .drop-zone {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: #f8f9ff;
+            margin-bottom: 30px;
+            display: none;
+        }
+
+        .drop-zone:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+            transform: translateY(-2px);
+        }
+
+        .drop-zone-text {
+            font-size: 1.2em;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .progress-container {
+            display: none;
+            margin-top: 30px;
+            background: #f8f9ff;
+            padding: 25px;
+            border-radius: 15px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-percentage {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #333;
+            font-weight: 700;
+        }
+
+        .upload-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+
+        .success-message, .error-message {
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+            margin-top: 20px;
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .cancel-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .disconnect-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">⚡ 雷速云传</h1>
+        <p class="subtitle">Dropbox 高速文件上传器</p>
         
-        // 模拟上传进度
-        let progress = 0;
-        const interval = setInterval(() => {
-            progress += 10;
-            this.progressFill.style.width = progress + '%';
-            this.progressText.textContent = `上传中... ${progress}%`;
-            
-            if (progress >= 100) {
-                clearInterval(interval);
-                this.showSuccess(file);
-            }
-        }, 200);
-    }
+        <!-- 登录区域 -->
+        <div class="login-section" id="loginSection">
+            <div class="login-card">
+                <h3>🔐 登录 Dropbox 账户</h3>
+                <div class="input-group">
+                    <input type="email" id="emailInput" placeholder="Dropbox 邮箱地址">
+                </div>
+                <div class="input-group password-group">
+                    <input type="password" id="passwordInput" placeholder="Dropbox 密码">
+                    <button type="button" class="password-toggle" id="passwordToggle">👁️</button>
+                </div>
+                <button id="loginBtn" class="login-btn">🔐 登录 Dropbox</button>
+                <div class="help-links">
+                    <a href="#" id="showDemo">🎯 使用演示账户</a>
+                    <a href="#" id="showUser">👤 使用测试账户</a>
+                </div>
+                <div id="loginStatus" style="margin-top: 15px; text-align: center; color: #666;"></div>
+            </div>
+        </div>
 
-    showSuccess(file) {
-        this.progressContainer.style.display = 'none';
-        this.successMessage.innerHTML = `
-            <h3>✅ 上传成功！</h3>
-            <p>文件: ${file.name}</p>
-            <p>大小: ${this.formatFileSize(file.size)}</p>
-        `;
-        this.successMessage.style.display = 'block';
-    }
+        <!-- 账户信息 -->
+        <div class="account-info" id="accountInfo">
+            <div id="accountDetails"></div>
+            <button id="disconnectBtn" class="disconnect-btn">断开连接</button>
+        </div>
+        
+        <!-- 上传区域 -->
+        <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-text">⚡ 拖拽文件到这里或点击选择</div>
+            <div style="color: #999; font-size: 0.9em;">支持大文件上传 • 断点续传 • 多线程加速</div>
+        </div>
+        
+        <input type="file" id="fileInput" style="display: none;">
+        
+        <!-- 文件信息 -->
+        <div id="fileInfo" style="display: none; margin-bottom: 20px; padding: 15px; background: #f8f9ff; border-radius: 10px;">
+            <div id="fileName" style="font-weight: 600; margin-bottom: 5px;"></div>
+            <div id="fileSize" style="color: #666; font-size: 0.9em;"></div>
+        </div>
+        
+        <!-- 进度条 -->
+        <div class="progress-container" id="progressContainer">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                <span id="progressText">准备上传...</span>
+                <button id="cancelBtn" class="cancel-btn">❌ 取消</button>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+                <div class="progress-percentage" id="progressPercentage">0%</div>
+            </div>
+            <div class="upload-details">
+                <div class="detail-row">
+                    <span>进度:</span>
+                    <span id="chunkInfo">0 / 0 块</span>
+                </div>
+                <div class="detail-row">
+                    <span>速度:</span>
+                    <span id="speedText">0 MB/s</span>
+                </div>
+                <div class="detail-row">
+                    <span>剩余:</span>
+                    <span id="timeInfo">计算中...</span>
+                </div>
+                <div class="detail-row">
+                    <span>已传:</span>
+                    <span id="uploadedInfo">0 MB / 0 MB</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="success-message" id="successMessage"></div>
+        <div class="error-message" id="errorMessage"></div>
+    </div>
 
-    formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-}
-
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    new FileUploader();
-});
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
