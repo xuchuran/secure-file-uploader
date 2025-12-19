@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>上传测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .status { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .progress { width: 100%; height: 20px; background: #f0f0f0; margin: 10px 0; }
+        .progress-bar { height: 100%; background: #28a745; width: 0%; transition: width 0.3s; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        input[type="file"] { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>文件上传测试</h1>
+    
+    <div id="status" class="status info">准备就绪</div>
+    
+    <button onclick="login()">登录演示账户</button>
+    <button onclick="loginUser()">登录用户账户</button>
+    
+    <div>
+        <input type="file" id="fileInput">
+        <button onclick="uploadFile()">上传文件</button>
+    </div>
+    
+    <div class="progress" id="progressContainer" style="display: none;">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div id="progressText"></div>
+    
+    <div id="result"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let isConnected = false;
+        let currentUpload = null;
+
+        function updateStatus(message, type = 'info') {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function login() {
+            updateStatus('正在登录演示账户...', 'info');
+            socket.emit('login-with-credentials', {
+                email: 'demo@example.com',
+                password: 'demo123'
+            });
+        }
+
+        function loginUser() {
+            updateStatus('正在登录测试账户...', 'info');
+            socket.emit('login-with-credentials', {
+                email: 'user@example.com',
+                password: 'password123'
+            });
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files.length) {
+                updateStatus('请先选择文件！', 'error');
+                return;
+            }
+            
+            if (!isConnected) {
+                updateStatus('请先登录！', 'error');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            handleFile(file);
+        }
+
+        function handleFile(file) {
+            updateStatus(`准备上传: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`, 'info');
+            
+            document.getElementById('progressContainer').style.display = 'block';
+            document.getElementById('progressText').textContent = '初始化上传...';
+
+            currentUpload = {
+                file: file,
+                chunkSize: 1024 * 1024 * 2 // 2MB chunks
+            };
+
+            socket.emit('init-upload', {
+                fileName: file.name,
+                fileSize: file.size,
+                chunkSize: currentUpload.chunkSize
+            });
+        }
+
+        // Socket 事件监听
+        socket.on('dropbox-connected', (data) => {
+            isConnected = true;
+            updateStatus(`已连接: ${data.name} (${data.email})`, 'success');
+        });
+
+        socket.on('dropbox-error', (data) => {
+            isConnected = false;
+            updateStatus(`连接失败: ${data.error}`, 'error');
+        });
+
+        socket.on('upload-initialized', (data) => {
+            console.log('上传初始化成功:', data);
+            currentUpload.sessionId = data.sessionId;
+            currentUpload.totalChunks = data.totalChunks;
+            updateStatus(`开始上传 ${data.totalChunks} 个块...`, 'info');
+            startUpload();
+        });
+
+        socket.on('chunk-uploaded', (data) => {
+            console.log('块上传完成:', data);
+            const progress = data.progress;
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('progressText').textContent = 
+                `进度: ${progress}% (${data.uploadedChunks}/${data.totalChunks}) 速度: ${data.speed}`;
+        });
+
+        socket.on('upload-complete', (data) => {
+            console.log('上传完成:', data);
+            updateStatus(`上传成功！文件: ${data.fileName}，用时: ${data.totalTime.toFixed(2)}秒`, 'success');
+            document.getElementById('result').innerHTML = 
+                `<h3>上传成功!</h3><p>文件: ${data.fileName}</p><p>平均速度: ${data.averageSpeed}</p>`;
+        });
+
+        socket.on('upload-error', (data) => {
+            console.log('上传错误:', data);
+            updateStatus(`上传失败: ${data.error}`, 'error');
+        });
+
+        async function startUpload() {
+            const { file, sessionId, chunkSize } = currentUpload;
+            const totalChunks = Math.ceil(file.size / chunkSize);
+
+            for (let i = 0; i < totalChunks; i++) {
+                console.log(`上传块 ${i + 1}/${totalChunks}`);
+                await uploadChunk(i);
+                await new Promise(resolve => setTimeout(resolve, 10)); // 短暂延迟
+            }
+        }
+
+        function uploadChunk(chunkIndex) {
+            return new Promise((resolve, reject) => {
+                const { file, sessionId, chunkSize } = currentUpload;
+                const start = chunkIndex * chunkSize;
+                const end = Math.min(start + chunkSize, file.size);
+                const chunk = file.slice(start, end);
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const arrayBuffer = e.target.result;
+                        const bytes = new Uint8Array(arrayBuffer);
+                        let binary = '';
+                        
+                        // 分块处理避免栈溢出
+                        const chunkSize = 8192;
+                        for (let i = 0; i < bytes.length; i += chunkSize) {
+                            const chunk = bytes.slice(i, i + chunkSize);
+                            binary += String.fromCharCode.apply(null, chunk);
+                        }
+                        
+                        const base64Data = btoa(binary);
+                        
+                        socket.emit('upload-chunk', {
+                            sessionId,
+                            chunkIndex,
+                            chunkData: base64Data
+                        });
+                        
+                        resolve();
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(chunk);
+            });
+        }
+    </script>
+</body>
+</html>

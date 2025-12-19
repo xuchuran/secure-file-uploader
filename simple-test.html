@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>简单上传测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .drop-zone { 
+            border: 2px dashed #ccc; 
+            padding: 50px; 
+            text-align: center; 
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        .progress { 
+            width: 100%; 
+            height: 20px; 
+            background: #f0f0f0; 
+            margin: 10px 0;
+        }
+        .progress-bar { 
+            height: 100%; 
+            background: #4CAF50; 
+            width: 0%; 
+            transition: width 0.3s;
+        }
+        .info { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>简单上传测试</h1>
+    
+    <button onclick="login()">登录演示账户</button>
+    <div id="status">未登录</div>
+    
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        点击选择文件或拖拽到这里
+    </div>
+    <input type="file" id="fileInput" style="display: none;">
+    
+    <div class="info" id="fileInfo" style="display: none;">
+        <div>文件: <span id="fileName"></span></div>
+        <div>大小: <span id="fileSize"></span></div>
+    </div>
+    
+    <div class="progress" id="progressContainer" style="display: none;">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div id="progressText"></div>
+    
+    <div id="result"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let isConnected = false;
+        let currentUpload = null;
+
+        // 登录
+        function login() {
+            socket.emit('login-with-credentials', {
+                email: 'demo@example.com',
+                password: 'demo123'
+            });
+        }
+
+        // Socket 事件
+        socket.on('dropbox-connected', (data) => {
+            isConnected = true;
+            document.getElementById('status').textContent = `已连接: ${data.name}`;
+        });
+
+        socket.on('dropbox-error', (data) => {
+            document.getElementById('status').textContent = `错误: ${data.error}`;
+        });
+
+        socket.on('upload-initialized', (data) => {
+            console.log('上传初始化:', data);
+            currentUpload.sessionId = data.sessionId;
+            currentUpload.totalChunks = data.totalChunks;
+            startUpload();
+        });
+
+        socket.on('chunk-uploaded', (data) => {
+            console.log('块上传完成:', data);
+            const progress = data.progress;
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('progressText').textContent = 
+                `进度: ${progress}% (${data.uploadedChunks}/${data.totalChunks}) 速度: ${data.speed}`;
+        });
+
+        socket.on('upload-complete', (data) => {
+            console.log('上传完成:', data);
+            document.getElementById('result').innerHTML = 
+                `<h3>上传成功!</h3><p>文件: ${data.fileName}</p><p>用时: ${data.totalTime}秒</p>`;
+        });
+
+        socket.on('upload-error', (data) => {
+            console.log('上传错误:', data);
+            document.getElementById('result').innerHTML = `<h3>上传失败: ${data.error}</h3>`;
+        });
+
+        // 文件选择
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!isConnected) {
+                alert('请先登录!');
+                return;
+            }
+
+            console.log('处理文件:', file.name, file.size);
+            
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB';
+            document.getElementById('fileInfo').style.display = 'block';
+            document.getElementById('progressContainer').style.display = 'block';
+
+            currentUpload = {
+                file: file,
+                chunkSize: 1024 * 1024 * 2 // 2MB chunks
+            };
+
+            // 初始化上传
+            socket.emit('init-upload', {
+                fileName: file.name,
+                fileSize: file.size,
+                chunkSize: currentUpload.chunkSize
+            });
+        }
+
+        async function startUpload() {
+            console.log('开始上传...');
+            const { file, sessionId, chunkSize } = currentUpload;
+            const totalChunks = Math.ceil(file.size / chunkSize);
+
+            for (let i = 0; i < totalChunks; i++) {
+                console.log(`上传块 ${i + 1}/${totalChunks}`);
+                await uploadChunk(i);
+            }
+        }
+
+        function uploadChunk(chunkIndex) {
+            return new Promise((resolve, reject) => {
+                const { file, sessionId, chunkSize } = currentUpload;
+                const start = chunkIndex * chunkSize;
+                const end = Math.min(start + chunkSize, file.size);
+                const chunk = file.slice(start, end);
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const base64Data = btoa(String.fromCharCode(...new Uint8Array(e.target.result)));
+                    
+                    socket.emit('upload-chunk', {
+                        sessionId,
+                        chunkIndex,
+                        chunkData: base64Data
+                    });
+                    
+                    resolve();
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(chunk);
+            });
+        }
+    </script>
+</body>
+</html>
